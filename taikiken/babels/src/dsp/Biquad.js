@@ -10,6 +10,8 @@
  *
  * This notice shall be included in all copies or substantial portions of the Software.
  */
+
+const typeSymbol = Symbol();
 /**
  * Biquad filter
  *
@@ -20,6 +22,11 @@
  * @see http://www.musicdsp.org/files/Audio-EQ-Cookbook.txt
  */
 export class Biquad {
+  /**
+   *
+   * @param {number} type
+   * @param {number} sampleRate
+   */
   constructor(type, sampleRate) {
     // L
     const x1l = 0;
@@ -78,6 +85,9 @@ export class Biquad {
     // dB/octave, remains proportional to S for all other values for a
     // fixed f0/Fs and dBgain.
     const s = 1;
+
+    this[typeSymbol] = type;
+
     // make property
     Object.assign(this, {
       parameterType: Biquad.Q,
@@ -233,7 +243,255 @@ export class Biquad {
   // ----------------------------------------
   // METHOD
   // ----------------------------------------
-  recalculateCoefficients() {
+  /**
+   *
+   * @returns {{b: *[], a: *[]}}
+   */
+  coefficients() {
+    return {
+      b: [
+        this.b0,
+        this.b1,
+        this.b2,
+      ],
+      a: [
+        this.a0,
+        this.a1,
+        this.a2,
+      ],
+    };
+  }
+  setFilterType(type) {
+    this.type = type;
+    this.recalculateCoefficients(this[typeSymbol]);
+  }
+  setSampleRate(rate) {
+    this.sampleRate = rate;
+    this.recalculateCoefficients(this[typeSymbol]);
+  }
+  setQ(q) {
+    this.parameterType = Biquad.Q;
+    this.q = Math.max(Math.min(q, 115.0), 0.001);
+    this.recalculateCoefficients(this[typeSymbol]);
+  }
+  setBW(bw) {
+    this.parameterType = Biquad.BW;
+    this.bw = bw;
+    this.recalculateCoefficients(this[typeSymbol]);
+  }
+  setS(s) {
+    this.parameterType = Biquad.S;
+    this.s = Math.max(Math.min(s, 5.0), 0.0001);
+    this.recalculateCoefficients(this[typeSymbol]);
+  }
+  setF0(freq) {
+    this.f0 = freq;
+    this.recalculateCoefficients(this[typeSymbol]);
+  }
+  setDbGain(gain) {
+    this.dBgain = gain;
+    this.recalculateCoefficients(this[typeSymbol]);
+  }
+  /**
+   * re calculate coefficients
+   * @param {number} type
+   */
+  recalculateCoefficients(type) {
+    const answer = this.peaking(type);
+    const [consW0, sinW0, alpha] = this.alpha(answer);
+    const [b0, b1, b2, a0, a1, a2] = this.coeff(consW0, sinW0, alpha, answer);
+    // copy to this property
+    this.b0 = b0;
+    this.b1 = b1;
+    this.b2 = b2;
+    this.a0 = a0;
+    this.a1 = a1;
+    this.a2 = a2;
+    // calculate
+    this.b0a0 = b0 / a0;
+    this.b1a0 = b1 / a0;
+    this.b2a0 = b2 / a0;
+    this.a1a0 = a1 / a0;
+    this.a2a0 = a2 / a0;
+  }
+
+  /**
+   * for peaking and shelving EQ filters only
+   * @param {number} type
+   * @returns {number}
+   */
+  peaking(type) {
+    // for peaking and shelving EQ filters only
+    switch(type) {
+      case Biquad.PEAKING_EQ:
+      case Biquad.LOW_SHELF:
+      case Biquad.HIGH_SHELF: {
+        return Math.pow(10, this.dBgain / 40);
+      }
+      default: {
+        return Math.sqrt(Math.pow(10, this.dBgain / 20))
+      }
+    }
+  }
+  /**
+   *
+   * @param {number} answer
+   * @returns {*[]} cosW0, sinW0, alpha
+   */
+  alpha(answer) {
+    const w0 = Biquad.TWO_PI * this.f0 / this.sampleRate;
+    const cosW0 = Math.cos(w0);
+    const sinW0 = Math.sin(w0);
+    let results = [cosW0, sinW0];
+
+    switch(this.parameterType) {
+      case Biquad.Q: {
+        results.push(sinW0 / 2 * this.q);
+        break;
+      }
+      case Biquad.BW: {
+        results.push(sinW0 * sinh(Math.LN2 / 2 * this.bw * w0 / sinW0));
+        break;
+      }
+      case Biquad.S: {
+        results.push(sinW0 / 2 * Math.sqrt((answer + 1 / answer) * (1 / this.s - 1) + 2));
+        break;
+      }
+      default: {
+        results.push(0);
+        break;
+      }
+    }
+    return results;
+  }
+
+  /**
+   * FYI: The relationship between bandwidth and Q is
+   * 1/Q = 2*sinh(ln(2)/2*BW*w0/sin(w0))     (digital filter w BLT)
+   * or   1/Q = 2*sinh(ln(2)/2*BW)             (analog filter prototype)
+   *
+   * The relationship between shelf slope and Q is
+   * 1/Q = sqrt((A + 1/A)*(1/S - 1) + 2)
+   *
+   * @param {number} cosW0
+   * @param {number} sinW0
+   * @param {number} alpha
+   * @param {number} answer
+   * @returns {*[]} b0, b1, b2, a0, a1, a2
+   */
+  coeff(cosW0, sinW0, alpha, answer) {
+    // return [b0, b1, b2, a0, a1, a2]
+    switch(this.type) {
+      case Biquad.LPF: {
+        const oneMinusCosW0 = 1 - cosW0;
+        return [
+          oneMinusCosW0 / 2,
+          oneMinusCosW0,
+          (oneMinusCosW0) / 2,
+          1 + alpha,
+          -2 * cosW0,
+          1 - alpha,
+        ];
+      }
+      case Biquad.HPF: {
+        const onePlusCosW0 = 1 + cosW0;
+        return [
+          onePlusCosW0 / 2,
+          -onePlusCosW0,
+          onePlusCosW0 / 2,
+          1 + alpha,
+          -2 * cosW0,
+          1 - alpha,
+        ];
+      }
+      case Biquad.BPF_CONSTANT_SKIRT: {
+        const sinW0Half = sinW0 / 2;
+        return [
+          sinW0Half,
+          0,
+          -sinW0Half,
+          1 + alpha,
+          -2 * cosW0,
+          1 - alpha,
+        ];
+      }
+      case Biquad.BPF_CONSTANT_PEAK: {
+        return [
+          alpha,
+          0,
+          -alpha,
+          1 + alpha,
+          -2 * cosW0,
+          1 - alpha,
+        ];
+      }
+      case Biquad.NOTCH: {
+        return [
+          1,
+          -2 * cosW0,
+          1 + alpha,
+          1 + alpha,
+          -2 * cosW0,
+          1 - alpha,
+        ];
+      }
+      case Biquad.APF: {
+        return [
+          1 - alpha,
+          -2 * cosW0,
+          1 + alpha,
+          1 + alpha,
+          -2 * cosW0,
+          1 - alpha,
+        ];
+      }
+      case Biquad.PEAKING_EQ: {
+        return [
+          1 + alpha * answer,
+          -2 * cosW0,
+          1 - alpha * answer,
+          1 + alpha / answer,
+          -2 * cosW0,
+          1 - alpha / answer,
+        ];
+      }
+      case Biquad.LOW_SHELF: {
+        const coeff = sinW0 * Math.sqrt((answer ^ 2 + 1) * (1 / this.s - 1) + 2 * answer);
+        const aPlusOne = answer + 1;
+        const aMinusOne = answer  - 1;
+        return [
+          answer * (aPlusOne - aMinusOne * cosW0 + coeff),
+          answer * (aMinusOne - aPlusOne * cosW0),
+          2 * answer * (aPlusOne - aMinusOne * cosW0),
+          answer * (aPlusOne - aMinusOne * cosW0 - coeff),
+          aPlusOne + aMinusOne * cosW0 + coeff,
+          -2 * (aMinusOne + aPlusOne * cosW0),
+          aPlusOne + aMinusOne * cosW0 - coeff,
+        ];
+      }
+      case Biquad.HIGH_SHELF: {
+        const coeff = sinW0 * Math.sqrt((answer ^ 2 + 1) * (1 / this.s - 1) + 2 * answer);
+        const aPlusOne = answer + 1;
+        const aMinusOne = answer  - 1;
+        return [
+          answer * (aPlusOne + aMinusOne * cosW0 + coeff),
+          -2 * answer * (aMinusOne + aPlusOne * cosW0),
+          answer * (aPlusOne + aMinusOne * cosW0 - coeff),
+          aPlusOne - aMinusOne * cosW0,
+          2 * (aMinusOne - aPlusOne * cosW0),
+          aPlusOne - aMinusOne * cosW0 - coeff,
+        ];
+      }
+    }
+  }
+
+  process(buffers) {
+    const output = new Float64Array(buffers.length);
+    // output.map((buffer, index) => {
+    //
+    // });
+  }
+  processStereo(buffer) {
 
   }
 }
