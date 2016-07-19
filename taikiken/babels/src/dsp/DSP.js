@@ -137,5 +137,87 @@ export class DSP {
   static get NOTCH() {
     return 3;
   }
+
+  // Loop modes
+  /**
+   * Loop modes - off
+   * @const OFF
+   * @returns {number} Loop modes - off (0) を返します
+   * @default 0
+   */
+  static get OFF() {
+    return 0;
+  }
+  /**
+   * Loop modes - fw
+   * @const FW
+   * @returns {number} Loop modes - fw (1) を返します
+   * @default 1
+   */
+  static get FW() {
+    return 1;
+  }
+  /**
+   * Loop modes - bw
+   * @const BW
+   * @returns {number} Loop modes - bw (2) を返します
+   * @default 2
+   */
+  static get BW() {
+    return 2;
+  }
+  /**
+   * Loop modes - fwbw
+   * @const FWBW
+   * @returns {number} Loop modes - fwbw (3) を返します
+   * @default 2
+   */
+  static get FWBW() {
+    return 3;
+  }
+
+  // Math
+  /**
+   * PI * 2
+   * @const TWO_PI
+   * @returns {number} PI * 2 を返します
+   * @default Math.PI * 2
+   */
+  static get TWO_PI() {
+    return Math.PI * 2;
+  }
+
+
+  // ----------------------------------------
+  // METHOD STATIC
+  // ----------------------------------------
+  /**
+   * Inverts the phase of a signal
+   * @param {Array|*} buffers A sample buffer
+   * @returns {Array|*} The inverted sample buffer
+   */
+  static invert(buffers) {
+    return buffers.map((buffer) => -1 * buffer);
+  }
+
+  /**
+   * Helper method (for Reverb) to mix two (interleaved) sample buffers. It's possible
+   * to negate the second buffer while mixing and to perform a volume correction
+   * on the final signal.
+   *
+   * @param {Array|*} sampleBuffer1 Array containing Float values or a Float64Array
+   * @param {Array|*} sampleBuffer2 Array containing Float values or a Float64Array
+   * @param {Boolean} negate When true inverts/flips the audio signal
+   * @param {Number} volumeCorrection When you add multiple sample buffers, use this to tame your signal ;)
+   * @returns {Float64Array} A new Float64Array interleaved buffer.
+   */
+  static mixSampleBuffers(sampleBuffer1, sampleBuffer2, negate, volumeCorrection) {
+    let outputSamples = new Float64Array(sampleBuffer1);
+    outputSamples.map((buffer, index) => {
+      let sign = negate ? -1 : 1;
+      return sign * sampleBuffer2[index] / volumeCorrection;
+    });
+    return outputSamples;
+  }
 }
 
